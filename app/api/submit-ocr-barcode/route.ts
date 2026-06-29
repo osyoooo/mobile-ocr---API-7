@@ -14,6 +14,8 @@ type GasResponse = {
   ok: boolean;
   row?: number;
   requestId?: string;
+  sheet?: string;
+  receivedMode?: string;
   error?: string;
 };
 
@@ -93,6 +95,9 @@ export async function POST(request: Request) {
 
     const payload = {
       mode: 'ocrBarcode',
+      sheet: 'OCR_Barcode',
+      targetSheet: 'OCR_Barcode',
+      ocrBarcode: true,
       secret: sharedSecret,
       barcode,
       totalAmount: toInteger(body.totalAmount),
@@ -153,7 +158,13 @@ export async function POST(request: Request) {
       );
     }
 
-    return Response.json({ ok: true, row: data.row, requestId: data.requestId });
+    return Response.json({
+      ok: true,
+      row: data.row,
+      requestId: data.requestId,
+      sheet: data.sheet ?? 'OCR_Barcode',
+      receivedMode: data.receivedMode ?? 'ocrBarcode',
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーです。';
     console.error('/api/submit-ocr-barcode error', error);
