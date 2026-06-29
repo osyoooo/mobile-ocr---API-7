@@ -25,6 +25,17 @@ function requiredEnv(name: 'GAS_WEB_APP_URL' | 'GAS_SHARED_SECRET') {
   return value;
 }
 
+function normalizeSecret(value: string) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 function cleanText(value: unknown, maxLength: number) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, maxLength);
@@ -78,7 +89,7 @@ export async function POST(request: Request) {
     }
 
     const gasWebAppUrl = requiredEnv('GAS_WEB_APP_URL');
-    const sharedSecret = requiredEnv('GAS_SHARED_SECRET');
+    const sharedSecret = normalizeSecret(requiredEnv('GAS_SHARED_SECRET'));
 
     const payload = {
       mode: 'ocrBarcode',
@@ -127,10 +138,16 @@ export async function POST(request: Request) {
     }
 
     if (!data?.ok) {
+      const gasError = data?.error ?? 'Google Apps Script 側で保存に失敗しました。';
+      const errorMessage =
+        gasError === 'unauthorized'
+          ? 'GAS認証エラーです。VercelのGAS_SHARED_SECRETとApps ScriptのsetupOnce()で保存したsecretが一致していません。'
+          : gasError;
+
       return Response.json(
         {
           ok: false,
-          error: data?.error ?? 'Google Apps Script 側で保存に失敗しました。',
+          error: errorMessage,
         },
         { status: 502 },
       );
