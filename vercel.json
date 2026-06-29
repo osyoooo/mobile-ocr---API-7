@@ -1,3 +1,7 @@
 {
-  "installCommand": "npm install --package-lock=false --no-audit --no-fund --registry=https://registry.npmjs.org/"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm install --package-lock=false --no-audit --no-fund --registry=https://registry.npmjs.org/",
+  "buildCommand": "npm run build",
+  "outputDirectory": null
 }
