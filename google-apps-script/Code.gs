@@ -80,7 +80,7 @@ function doPost(e) {
       return json_({ ok: false, error: 'unauthorized' });
     }
 
-    if (String(payload.mode || '') === 'ocrBarcode') {
+    if (isOcrBarcodePayload_(payload)) {
       return appendOcrBarcodeRow_(payload);
     }
 
@@ -128,7 +128,29 @@ function appendOcrBarcodeRow_(payload) {
   SpreadsheetApp.flush();
   const row = sheet.getLastRow();
 
-  return json_({ ok: true, row, requestId, sheet: CONFIG.OCR_BARCODE_SHEET_NAME });
+  return json_({
+    ok: true,
+    row,
+    requestId,
+    sheet: CONFIG.OCR_BARCODE_SHEET_NAME,
+    receivedMode: normalizeText_(payload.mode, 80),
+  });
+}
+
+function isOcrBarcodePayload_(payload) {
+  const mode = normalizeText_(payload.mode, 80);
+  const sheet = normalizeText_(payload.sheet || payload.targetSheet, 80);
+
+  if (mode === 'ocrBarcode' || mode === 'ocr_barcode') return true;
+  if (sheet === CONFIG.OCR_BARCODE_SHEET_NAME) return true;
+  if (payload.ocrBarcode === true || normalizeText_(payload.ocrBarcode, 20) === 'true') return true;
+
+  // Vercel側の送信コードが古くても、OCR金額フィールドが含まれていればOCR_Barcodeとして扱います。
+  const ocrKeys = ['totalAmount', 'subsidyAmount', 'voucherAmount', 'payableAmount', 'voucherUsed'];
+  return ocrKeys.some(function (key) {
+    if (payload[key] === null || typeof payload[key] === 'undefined') return false;
+    return normalizeText_(payload[key], 80) !== '';
+  });
 }
 
 function appendBarcodeOnlyRow_(payload) {
@@ -160,7 +182,13 @@ function appendBarcodeOnlyRow_(payload) {
   SpreadsheetApp.flush();
   const row = sheet.getLastRow();
 
-  return json_({ ok: true, row, requestId, sheet: CONFIG.BARCODE_ONLY_SHEET_NAME });
+  return json_({
+    ok: true,
+    row,
+    requestId,
+    sheet: CONFIG.BARCODE_ONLY_SHEET_NAME,
+    receivedMode: normalizeText_(payload.mode, 80),
+  });
 }
 
 function parsePayload_(e) {
