@@ -11,6 +11,7 @@ type ApiResponse = {
   ok: boolean;
   row?: number;
   requestId?: string;
+  sheet?: string;
   error?: string;
 };
 
@@ -166,6 +167,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
   const [readAt, setReadAt] = useState('');
   const [manualCode, setManualCode] = useState('');
   const [savedRow, setSavedRow] = useState<number | null>(null);
+  const [savedSheet, setSavedSheet] = useState('');
   const [requestId, setRequestId] = useState('');
 
   const stopCamera = useCallback((message?: string) => {
@@ -215,6 +217,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
       setCameraErrorMessage('');
       setSendErrorMessage('');
       setSavedRow(null);
+      setSavedSheet('');
       setRequestId('');
       setStatusMessage('バーコードを読み取りました。内容を確認して「データを送る」を押してください。');
       vibrateSuccess();
@@ -231,6 +234,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     setBarcodeFormat('');
     setReadAt('');
     setSavedRow(null);
+    setSavedSheet('');
     setRequestId('');
     detectedRef.current = false;
     candidateRef.current = { value: '', count: 0, lastAt: 0 };
@@ -351,6 +355,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
 
       setSaveState('saved');
       setSavedRow(data.row ?? null);
+      setSavedSheet(data.sheet ?? 'OCR_Barcode');
       setRequestId(data.requestId ?? '');
       setStatusMessage('保存が完了しました。次の申込表に進めます。');
       vibrateSuccess();
@@ -487,7 +492,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         {saveState === 'saved' ? (
           <>
             <p className="saved-message">
-              保存完了{savedRow ? ` / 行 ${savedRow}` : ''}{requestId ? ` / ID ${requestId}` : ''}
+              保存完了{savedSheet ? ` / 保存先 ${savedSheet}` : ''}{savedRow ? ` / 行 ${savedRow}` : ''}{requestId ? ` / ID ${requestId}` : ''}
             </p>
             <button className="primary-button" type="button" onClick={onStartOver}>
               次の申込表を撮影する
