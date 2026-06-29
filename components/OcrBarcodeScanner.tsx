@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarcodeFormat, BrowserMultiFormatOneDReader, type IScannerControls } from '@zxing/browser';
-import { DecodeHintType } from '@zxing/library';
+import { BrowserMultiFormatOneDReader, type IScannerControls } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { formatYen, type PaymentSummary } from '@/lib/calc';
 
 type SaveState = 'idle' | 'scanning' | 'detected' | 'saving' | 'saved' | 'error';
