@@ -45,7 +45,7 @@ const CONFIG = {
  * secret は Vercel の GAS_SHARED_SECRET と同じ文字列にします。
  */
 function setupOnce() {
-  const secret = 'change_this_to_a_long_random_string';
+  const secret = normalizeSecret_('change_this_to_a_long_random_string');
   PropertiesService.getScriptProperties().setProperty('SHARED_SECRET', secret);
 
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -76,7 +76,7 @@ function doPost(e) {
       return json_({ ok: false, error: 'Apps Script の SHARED_SECRET が未設定です。setupOnce() を実行してください。' });
     }
 
-    if (String(payload.secret || '') !== expectedSecret) {
+    if (normalizeSecret_(payload.secret) !== normalizeSecret_(expectedSecret)) {
       return json_({ ok: false, error: 'unauthorized' });
     }
 
@@ -239,6 +239,17 @@ function normalizeNumber_(value) {
 function normalizeText_(value, maxLength) {
   if (value === null || typeof value === 'undefined') return '';
   return String(value).trim().slice(0, maxLength);
+}
+
+function normalizeSecret_(value) {
+  const text = normalizeText_(value, 500);
+  if (
+    (text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
+    (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'")
+  ) {
+    return text.substring(1, text.length - 1).trim();
+  }
+  return text;
 }
 
 function json_(object) {
