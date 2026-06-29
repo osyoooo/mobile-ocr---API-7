@@ -599,6 +599,19 @@ h2 {
   font-weight: 900;
 }
 
+.sticky-operator-row {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  margin: -4px -4px 0;
+  padding: 10px;
+  border: 1px solid #b2f5ea;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(19, 78, 74, 0.1);
+  backdrop-filter: blur(12px);
+}
+
 .operator-input {
   width: 100%;
   min-height: 52px;
@@ -635,11 +648,27 @@ h2 {
 
 .barcode-scan-frame {
   position: absolute;
-  inset: 22% 8%;
-  border: 3px solid rgba(255, 255, 255, 0.92);
+  inset: 34% 14%;
+  border: 3px solid rgba(255, 255, 255, 0.96);
   border-radius: 18px;
-  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.34);
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.52);
   pointer-events: none;
+}
+
+.barcode-scan-guide {
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 92vw;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
 }
 
 .barcode-scan-line {
@@ -768,6 +797,11 @@ h2 {
   gap: 10px;
 }
 
+.send-error {
+  margin-top: 0;
+  text-align: left;
+}
+
 .send-button {
   width: 100%;
   min-height: 68px;
@@ -799,6 +833,6 @@ h2 {
   }
 
   .barcode-scan-frame {
-    inset: 24% 7%;
+    inset: 36% 10%;
   }
 }
