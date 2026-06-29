@@ -23,6 +23,13 @@ type OcrBarcodeScannerProps = {
 };
 
 const STORAGE_OPERATOR_KEY = 'barcode_scanner_operator';
+const REQUIRED_STABLE_DETECTIONS = 2;
+const TARGET_ZONE = {
+  minX: 0.18,
+  maxX: 0.82,
+  minY: 0.34,
+  maxY: 0.66,
+};
 
 const ONE_D_FORMATS: BarcodeFormat[] = [
   BarcodeFormat.CODABAR,
@@ -94,16 +101,65 @@ function getStateLabel(saveState: SaveState) {
   return 'エラー';
 }
 
+function getPointCoordinate(point: unknown, axis: 'x' | 'y') {
+  const maybePoint = point as {
+    getX?: () => number;
+    getY?: () => number;
+    x?: number;
+    y?: number;
+  };
+
+  const value =
+    axis === 'x'
+      ? typeof maybePoint.getX === 'function'
+        ? maybePoint.getX()
+        : maybePoint.x
+      : typeof maybePoint.getY === 'function'
+        ? maybePoint.getY()
+        : maybePoint.y;
+
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function isResultInsideTargetZone(result: { getResultPoints?: () => unknown[] }, video: HTMLVideoElement | null) {
+  if (!video) return true;
+
+  const videoWidth = video.videoWidth;
+  const videoHeight = video.videoHeight;
+  if (!videoWidth || !videoHeight) return true;
+
+  const points = typeof result.getResultPoints === 'function' ? result.getResultPoints() : [];
+  if (!points || points.length === 0) return true;
+
+  const coordinates = points
+    .map((point) => ({ x: getPointCoordinate(point, 'x'), y: getPointCoordinate(point, 'y') }))
+    .filter((point): point is { x: number; y: number } => point.x !== null && point.y !== null);
+
+  if (coordinates.length === 0) return true;
+
+  const minX = Math.min(...coordinates.map((point) => point.x));
+  const maxX = Math.max(...coordinates.map((point) => point.x));
+  const minY = Math.min(...coordinates.map((point) => point.y));
+  const maxY = Math.max(...coordinates.map((point) => point.y));
+  const centerX = (minX + maxX) / 2 / videoWidth;
+  const centerY = (minY + maxY) / 2 / videoHeight;
+
+  return centerX >= TARGET_ZONE.minX && centerX <= TARGET_ZONE.maxX && centerY >= TARGET_ZONE.minY && centerY <= TARGET_ZONE.maxY;
+}
+
 export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, onBack, onStartOver }: OcrBarcodeScannerProps) {
+  const rootRef = useRef<HTMLElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const readerRef = useRef<BrowserMultiFormatOneDReader | null>(null);
   const detectedRef = useRef(false);
+  const candidateRef = useRef({ value: '', count: 0, lastAt: 0 });
 
   const [isScanning, setIsScanning] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [statusMessage, setStatusMessage] = useState('カメラ開始を押してバーコードを読み取ってください。');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [cameraErrorMessage, setCameraErrorMessage] = useState('');
+  const [sendErrorMessage, setSendErrorMessage] = useState('');
   const [operator, setOperator] = useState('');
   const [barcode, setBarcode] = useState('');
   const [barcodeFormat, setBarcodeFormat] = useState('');
@@ -120,6 +176,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     } finally {
       controlsRef.current = null;
       readerRef.current = null;
+      candidateRef.current = { value: '', count: 0, lastAt: 0 };
       setIsScanning(false);
       if (message) setStatusMessage(message);
     }
@@ -128,6 +185,11 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
   useEffect(() => {
     const savedOperator = window.localStorage.getItem(STORAGE_OPERATOR_KEY);
     if (savedOperator) setOperator(savedOperator);
+
+    window.requestAnimationFrame(() => {
+      rootRef.current?.scrollIntoView({ block: 'start' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   }, []);
 
   useEffect(() => {
@@ -144,12 +206,14 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
       if (!normalizedBarcode) return;
 
       detectedRef.current = true;
+      candidateRef.current = { value: '', count: 0, lastAt: 0 };
       stopCamera();
       setBarcode(normalizedBarcode);
       setBarcodeFormat(format);
       setReadAt(detectedAt);
       setSaveState('detected');
-      setErrorMessage('');
+      setCameraErrorMessage('');
+      setSendErrorMessage('');
       setSavedRow(null);
       setRequestId('');
       setStatusMessage('バーコードを読み取りました。内容を確認して「データを送る」を押してください。');
@@ -161,28 +225,30 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
   const startScanning = useCallback(async () => {
     if (isScanning || saveState === 'saving') return;
 
-    setErrorMessage('');
+    setCameraErrorMessage('');
+    setSendErrorMessage('');
     setBarcode('');
     setBarcodeFormat('');
     setReadAt('');
     setSavedRow(null);
     setRequestId('');
     detectedRef.current = false;
+    candidateRef.current = { value: '', count: 0, lastAt: 0 };
 
     if (!window.isSecureContext) {
-      setErrorMessage('カメラ利用にはHTTPSが必要です。Vercel本番URL、またはlocalhostで開いてください。');
+      setCameraErrorMessage('カメラ利用にはHTTPSが必要です。Vercel本番URL、またはlocalhostで開いてください。');
       setSaveState('error');
       return;
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setErrorMessage('このブラウザはカメラAPIに対応していません。Safari/Chromeの最新版で試してください。');
+      setCameraErrorMessage('このブラウザはカメラAPIに対応していません。Safari/Chromeの最新版で試してください。');
       setSaveState('error');
       return;
     }
 
     if (!videoRef.current) {
-      setErrorMessage('video要素を初期化できませんでした。ページを再読み込みしてください。');
+      setCameraErrorMessage('video要素を初期化できませんでした。ページを再読み込みしてください。');
       setSaveState('error');
       return;
     }
@@ -197,8 +263,8 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
       hints.set(DecodeHintType.TRY_HARDER, true);
 
       const reader = new BrowserMultiFormatOneDReader(hints, {
-        delayBetweenScanAttempts: 120,
-        delayBetweenScanSuccess: 900,
+        delayBetweenScanAttempts: 90,
+        delayBetweenScanSuccess: 450,
         tryPlayVideoTimeout: 10000,
       });
       readerRef.current = reader;
@@ -215,7 +281,26 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
 
       const controls = await reader.decodeFromConstraints(constraints, videoRef.current, (result) => {
         if (!result || detectedRef.current) return;
+
         const nextBarcode = result.getText().trim();
+        if (!nextBarcode) return;
+
+        if (!isResultInsideTargetZone(result, videoRef.current)) {
+          candidateRef.current = { value: '', count: 0, lastAt: 0 };
+          setStatusMessage('枠の外のバーコードを検知しました。対象の1本だけを中央の読取ラインに合わせてください。');
+          return;
+        }
+
+        const now = Date.now();
+        const previous = candidateRef.current;
+        const count = previous.value === nextBarcode && now - previous.lastAt < 1600 ? previous.count + 1 : 1;
+        candidateRef.current = { value: nextBarcode, count, lastAt: now };
+
+        if (count < REQUIRED_STABLE_DETECTIONS) {
+          setStatusMessage(`候補 ${count}/${REQUIRED_STABLE_DETECTIONS}: ${nextBarcode}。そのまま中央で少し止めてください。`);
+          return;
+        }
+
         const nextFormat = getBarcodeFormatName(result.getBarcodeFormat());
         setDetectedBarcode(nextBarcode, nextFormat, new Date().toISOString());
       });
@@ -225,11 +310,11 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         stopCamera();
         return;
       }
-      setStatusMessage('読み取り中です。バーコードを枠の中央に水平に合わせてください。');
+      setStatusMessage('読み取り中です。対象のバーコード1本だけを中央の細い枠と赤い線に合わせてください。');
     } catch (error) {
       stopCamera();
       setSaveState('error');
-      setErrorMessage(getCameraErrorMessage(error));
+      setCameraErrorMessage(getCameraErrorMessage(error));
       setStatusMessage('カメラを起動できませんでした。');
     }
   }, [isScanning, saveState, setDetectedBarcode, stopCamera]);
@@ -238,7 +323,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     if (!barcode || saveState === 'saving') return;
 
     setSaveState('saving');
-    setErrorMessage('');
+    setSendErrorMessage('');
     setStatusMessage('スプレッドシートへ送信中です。');
 
     try {
@@ -272,7 +357,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存に失敗しました。';
       setSaveState('error');
-      setErrorMessage(message);
+      setSendErrorMessage(message);
       setStatusMessage('保存に失敗しました。内容を確認して再送信してください。');
     }
   }, [barcode, barcodeFormat, operator, paymentSummary, readAt, saveState, totalAmount]);
@@ -284,7 +369,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
   }
 
   return (
-    <section className="card barcode-card">
+    <section ref={rootRef} className="card barcode-card">
       <div className="screen-header barcode-header">
         <div>
           <div className="hero-eyebrow">BARCODE</div>
@@ -295,6 +380,17 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
           金額確認へ戻る
         </button>
       </div>
+
+      <label className="operator-row sticky-operator-row">
+        <span>担当者/端末名</span>
+        <input
+          className="operator-input"
+          value={operator}
+          onChange={(event) => setOperator(event.target.value)}
+          placeholder="例: 受付A / iPhone1"
+          maxLength={100}
+        />
+      </label>
 
       <div className="barcode-summary-grid" aria-label="送信予定の金額">
         <div>
@@ -323,21 +419,11 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         </div>
       </div>
 
-      <label className="operator-row">
-        <span>担当者/端末名</span>
-        <input
-          className="operator-input"
-          value={operator}
-          onChange={(event) => setOperator(event.target.value)}
-          placeholder="例: 受付A / iPhone1"
-          maxLength={100}
-        />
-      </label>
-
       <div className="barcode-camera-area">
         <video ref={videoRef} muted playsInline aria-label="バーコード読み取りカメラ" />
         {isScanning ? (
           <div className="barcode-scan-frame" aria-hidden="true">
+            <span className="barcode-scan-guide">この枠内の1本だけ</span>
             <span className="barcode-scan-line" />
           </div>
         ) : null}
@@ -347,12 +433,6 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
           <span>{statusMessage}</span>
         </div>
       </div>
-
-      {errorMessage ? (
-        <div className="inline-error" role="alert">
-          {errorMessage}
-        </div>
-      ) : null}
 
       <div className="barcode-actions">
         <button className="primary-button" type="button" onClick={startScanning} disabled={isScanning || saveState === 'saving'}>
@@ -370,6 +450,12 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
           カメラ停止
         </button>
       </div>
+
+      {cameraErrorMessage ? (
+        <div className="inline-error" role="alert">
+          {cameraErrorMessage}
+        </div>
+      ) : null}
 
       <div className="manual-barcode-box">
         <label>
@@ -408,9 +494,16 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
             </button>
           </>
         ) : (
-          <button className="primary-button send-button" type="button" onClick={submitData} disabled={!barcode || saveState === 'saving'}>
-            {saveState === 'saving' ? '送信中...' : 'データを送る'}
-          </button>
+          <>
+            <button className="primary-button send-button" type="button" onClick={submitData} disabled={!barcode || saveState === 'saving'}>
+              {saveState === 'saving' ? '送信中...' : 'データを送る'}
+            </button>
+            {sendErrorMessage ? (
+              <div className="inline-error send-error" role="alert">
+                {sendErrorMessage}
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </section>
