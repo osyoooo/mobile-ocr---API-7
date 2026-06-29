@@ -24,14 +24,6 @@ type OcrBarcodeScannerProps = {
 };
 
 const STORAGE_OPERATOR_KEY = 'barcode_scanner_operator';
-const REQUIRED_STABLE_DETECTIONS = 2;
-const TARGET_ZONE = {
-  minX: 0.18,
-  maxX: 0.82,
-  minY: 0.34,
-  maxY: 0.66,
-};
-
 const ONE_D_FORMATS: BarcodeFormat[] = [
   BarcodeFormat.CODABAR,
   BarcodeFormat.CODE_39,
@@ -102,59 +94,12 @@ function getStateLabel(saveState: SaveState) {
   return 'エラー';
 }
 
-function getPointCoordinate(point: unknown, axis: 'x' | 'y') {
-  const maybePoint = point as {
-    getX?: () => number;
-    getY?: () => number;
-    x?: number;
-    y?: number;
-  };
-
-  const value =
-    axis === 'x'
-      ? typeof maybePoint.getX === 'function'
-        ? maybePoint.getX()
-        : maybePoint.x
-      : typeof maybePoint.getY === 'function'
-        ? maybePoint.getY()
-        : maybePoint.y;
-
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function isResultInsideTargetZone(result: { getResultPoints?: () => unknown[] }, video: HTMLVideoElement | null) {
-  if (!video) return true;
-
-  const videoWidth = video.videoWidth;
-  const videoHeight = video.videoHeight;
-  if (!videoWidth || !videoHeight) return true;
-
-  const points = typeof result.getResultPoints === 'function' ? result.getResultPoints() : [];
-  if (!points || points.length === 0) return true;
-
-  const coordinates = points
-    .map((point) => ({ x: getPointCoordinate(point, 'x'), y: getPointCoordinate(point, 'y') }))
-    .filter((point): point is { x: number; y: number } => point.x !== null && point.y !== null);
-
-  if (coordinates.length === 0) return true;
-
-  const minX = Math.min(...coordinates.map((point) => point.x));
-  const maxX = Math.max(...coordinates.map((point) => point.x));
-  const minY = Math.min(...coordinates.map((point) => point.y));
-  const maxY = Math.max(...coordinates.map((point) => point.y));
-  const centerX = (minX + maxX) / 2 / videoWidth;
-  const centerY = (minY + maxY) / 2 / videoHeight;
-
-  return centerX >= TARGET_ZONE.minX && centerX <= TARGET_ZONE.maxX && centerY >= TARGET_ZONE.minY && centerY <= TARGET_ZONE.maxY;
-}
-
 export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, onBack, onStartOver }: OcrBarcodeScannerProps) {
   const rootRef = useRef<HTMLElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const readerRef = useRef<BrowserMultiFormatOneDReader | null>(null);
   const detectedRef = useRef(false);
-  const candidateRef = useRef({ value: '', count: 0, lastAt: 0 });
 
   const [isScanning, setIsScanning] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -178,7 +123,6 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     } finally {
       controlsRef.current = null;
       readerRef.current = null;
-      candidateRef.current = { value: '', count: 0, lastAt: 0 };
       setIsScanning(false);
       if (message) setStatusMessage(message);
     }
@@ -208,7 +152,6 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
       if (!normalizedBarcode) return;
 
       detectedRef.current = true;
-      candidateRef.current = { value: '', count: 0, lastAt: 0 };
       stopCamera();
       setBarcode(normalizedBarcode);
       setBarcodeFormat(format);
@@ -237,7 +180,6 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
     setSavedSheet('');
     setRequestId('');
     detectedRef.current = false;
-    candidateRef.current = { value: '', count: 0, lastAt: 0 };
 
     if (!window.isSecureContext) {
       setCameraErrorMessage('カメラ利用にはHTTPSが必要です。Vercel本番URL、またはlocalhostで開いてください。');
@@ -267,8 +209,8 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
       hints.set(DecodeHintType.TRY_HARDER, true);
 
       const reader = new BrowserMultiFormatOneDReader(hints, {
-        delayBetweenScanAttempts: 90,
-        delayBetweenScanSuccess: 450,
+        delayBetweenScanAttempts: 60,
+        delayBetweenScanSuccess: 300,
         tryPlayVideoTimeout: 10000,
       });
       readerRef.current = reader;
@@ -289,22 +231,6 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         const nextBarcode = result.getText().trim();
         if (!nextBarcode) return;
 
-        if (!isResultInsideTargetZone(result, videoRef.current)) {
-          candidateRef.current = { value: '', count: 0, lastAt: 0 };
-          setStatusMessage('枠の外のバーコードを検知しました。対象の1本だけを中央の読取ラインに合わせてください。');
-          return;
-        }
-
-        const now = Date.now();
-        const previous = candidateRef.current;
-        const count = previous.value === nextBarcode && now - previous.lastAt < 1600 ? previous.count + 1 : 1;
-        candidateRef.current = { value: nextBarcode, count, lastAt: now };
-
-        if (count < REQUIRED_STABLE_DETECTIONS) {
-          setStatusMessage(`候補 ${count}/${REQUIRED_STABLE_DETECTIONS}: ${nextBarcode}。そのまま中央で少し止めてください。`);
-          return;
-        }
-
         const nextFormat = getBarcodeFormatName(result.getBarcodeFormat());
         setDetectedBarcode(nextBarcode, nextFormat, new Date().toISOString());
       });
@@ -314,7 +240,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         stopCamera();
         return;
       }
-      setStatusMessage('読み取り中です。対象のバーコード1本だけを中央の細い枠と赤い線に合わせてください。');
+      setStatusMessage('読み取り中です。バーコードを枠の中央に水平に合わせてください。');
     } catch (error) {
       stopCamera();
       setSaveState('error');
@@ -428,7 +354,7 @@ export function OcrBarcodeScanner({ totalAmount, totalQuantity, paymentSummary, 
         <video ref={videoRef} muted playsInline aria-label="バーコード読み取りカメラ" />
         {isScanning ? (
           <div className="barcode-scan-frame" aria-hidden="true">
-            <span className="barcode-scan-guide">この枠内の1本だけ</span>
+            <span className="barcode-scan-guide">バーコードを中央に合わせる</span>
             <span className="barcode-scan-line" />
           </div>
         ) : null}
